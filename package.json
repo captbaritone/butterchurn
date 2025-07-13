@@ -1,5 +1,5 @@
 {
-  "name": "butterchurn",
+  "name": "@webamp/butterchurn",
   "version": "3.0.0-beta.5",
   "description": "Butterchurn is a WebGL implementation of the Milkdrop Visualizer",
   "main": "dist/butterchurn.js",
@@ -24,7 +24,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jberg/butterchurn.git"
+    "url": "git+https://github.com/captbaritone/butterchurn.git"
   },
   "keywords": [
     "music visualization",
