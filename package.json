@@ -1,5 +1,5 @@
 {
-  "name": "@webamp/butterchurn",
+  "name": "butterchurn",
   "version": "3.0.0-beta.5",
   "description": "Butterchurn is a WebGL implementation of the Milkdrop Visualizer",
   "main": "dist/butterchurn.js",
@@ -19,7 +19,8 @@
     "test:visual": "NODE_OPTIONS=\"--experimental-vm-modules\" jest --config jest.config.mjs test/visual/regression.test.js",
     "test:visual:update": "NODE_OPTIONS=\"--experimental-vm-modules\" jest --config jest.config.mjs test/visual/regression.test.js --updateSnapshot",
     "test:visual:watch": "NODE_OPTIONS=\"--experimental-vm-modules\" jest --config jest.config.mjs test/visual/regression.test.js --watch",
-    "test:visual:local": "yarn build && yarn test:visual",
+    "test:visual:local": "pnpm build && pnpm test:visual",
+    "test:visual:docker": "./scripts/test-visual-docker.sh",
     "test:visual:view": "open test/visual/__image_snapshots__/__diff_output__"
   },
   "repository": {
@@ -59,5 +60,10 @@
     "rollup-plugin-copy": "^3.5.0"
   },
   "browserslist": "supports audio-api and supports webgl2 and last 3 years",
-  "packageManager": "pnpm@10.6.5+sha1.da220e966c2db3275efb5928cf8f3592681b106b"
+  "packageManager": "pnpm@10.6.5+sha1.da220e966c2db3275efb5928cf8f3592681b106b",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "puppeteer"
+    ]
+  }
 }
