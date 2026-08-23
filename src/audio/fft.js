@@ -10,6 +10,11 @@ export default class FFT {
     }
     this.initBitRevTable();
     this.initCosSinTable();
+
+    // Preallocated FFT working buffers so timeToFrequencyDomain() doesn't
+    // churn the heap. Sizes are fixed for the FFT's lifetime.
+    this.real = new Float32Array(this.NFREQ);
+    this.imag = new Float32Array(this.NFREQ);
   }
 
   initEqualizeTable() {
@@ -69,9 +74,12 @@ export default class FFT {
     }
   }
 
-  timeToFrequencyDomain(waveDataIn) {
-    const real = new Float32Array(this.NFREQ);
-    const imag = new Float32Array(this.NFREQ);
+  timeToFrequencyDomain(waveDataIn, spectralDataOut) {
+    // Reuse per-instance scratch buffers; fully overwritten below before
+    // any read. Output buffer supplied by the caller so multiple
+    // channels don't stomp on each other.
+    const real = this.real;
+    const imag = this.imag;
 
     for (let i = 0; i < this.NFREQ; i++) {
       const idx = this.bitrevtable[i];
@@ -112,7 +120,6 @@ export default class FFT {
       t += 1;
     }
 
-    const spectralDataOut = new Float32Array(this.samplesOut);
     if (this.equalize) {
       for (let i = 0; i < this.samplesOut; i++) {
         spectralDataOut[i] =

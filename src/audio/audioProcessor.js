@@ -48,6 +48,13 @@ export default class AudioProcessor {
     this.tempTimeArrayL = new Int8Array(this.fftSize);
     this.tempTimeArrayR = new Int8Array(this.fftSize);
 
+    // Preallocated FFT output buffers; three separate ones because
+    // freqArray, freqArrayL, and freqArrayR each need to persist until
+    // the next processAudio() call.
+    this.freqArray = new Float32Array(this.numSamps);
+    this.freqArrayL = new Float32Array(this.numSamps);
+    this.freqArrayR = new Float32Array(this.numSamps);
+
     // Undersampled from this.fftSize to this.numSamps
     this.timeArrayL = new Int8Array(this.numSamps);
     this.timeArrayR = new Int8Array(this.numSamps);
@@ -90,10 +97,9 @@ export default class AudioProcessor {
       lastIdx = i;
     }
 
-    // Use full width samples for the FFT
-    this.freqArray = this.fft.timeToFrequencyDomain(this.timeArray);
-    this.freqArrayL = this.fft.timeToFrequencyDomain(this.timeByteArraySignedL);
-    this.freqArrayR = this.fft.timeToFrequencyDomain(this.timeByteArraySignedR);
+    this.fft.timeToFrequencyDomain(this.timeArray, this.freqArray);
+    this.fft.timeToFrequencyDomain(this.timeByteArraySignedL, this.freqArrayL);
+    this.fft.timeToFrequencyDomain(this.timeByteArraySignedR, this.freqArrayR);
   }
 
   connectAudio(audionode) {
