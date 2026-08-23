@@ -645,6 +645,15 @@ export default class Visualizer {
         preset.pixel_eqs_array,
         ...args
       );
+    // Fast path used by renderer when the preset has no per-pixel
+    // equations. Skips save/restore + the runVertEQs branch, hoists
+    // trig invariants, and guards rot=0. Same output as
+    // pixel_eqs_wasm(runVertEQs=false, ...).
+    preset.pixel_eqs_wasm_empty = (...args) =>
+      presetFunctionsMod.exports.runPixelEquationsEmpty(
+        preset.pixel_eqs_array,
+        ...args
+      );
 
     for (let i = 0; i < preset.shapes.length; i++) {
       if (preset.shapes[i].baseVals.enabled !== 0) {
