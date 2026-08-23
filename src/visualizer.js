@@ -515,29 +515,33 @@ export default class Visualizer {
       }
     }
 
-    for (let i = 0; i < preset.waves.length; i++) {
-      if (preset.waves[i].baseVals.enabled !== 0) {
-        wasmVarPools[`wavePerFrame${i}`] = {
-          ...qWasmVars,
-          ...tWasmVars,
-          ...this.createCustomWavePerFramePool(preset.waves[i].baseVals),
-        };
+    // Always create 4 wavePerFrame pools so presetFunctions.ts's
+    // runWavePointBatch{0..3} imports resolve regardless of how many
+    // waves this preset actually enables. Disabled slots get default
+    // globals that are never read at runtime (customWaveform.js skips
+    // disabled waves via the `waveEqs.baseVals.enabled` guard).
+    for (let i = 0; i < 4; i++) {
+      const wave = preset.waves && preset.waves[i];
+      const baseVals = (wave && wave.baseVals) || this.waveBaseValsDefaults;
+      wasmVarPools[`wavePerFrame${i}`] = {
+        ...qWasmVars,
+        ...tWasmVars,
+        ...this.createCustomWavePerFramePool(baseVals),
+      };
+      if (wave && wave.baseVals.enabled !== 0) {
         wasmFunctions[`waves_${i}_init_eqs`] = {
           pool: `wavePerFrame${i}`,
-          code: preset.waves[i].init_eqs_eel,
+          code: wave.init_eqs_eel,
         };
         wasmFunctions[`waves_${i}_frame_eqs`] = {
           pool: `wavePerFrame${i}`,
-          code: preset.waves[i].frame_eqs_eel,
+          code: wave.frame_eqs_eel,
         };
 
-        if (
-          preset.waves[i].point_eqs_eel &&
-          preset.waves[i].point_eqs_eel !== ""
-        ) {
+        if (wave.point_eqs_eel && wave.point_eqs_eel !== "") {
           wasmFunctions[`waves_${i}_point_eqs`] = {
             pool: `wavePerFrame${i}`,
-            code: preset.waves[i].point_eqs_eel,
+            code: wave.point_eqs_eel,
           };
         }
       }
@@ -601,6 +605,21 @@ export default class Visualizer {
           this.shapeBaseVars,
           3
         ),
+        // Wave-per-frame globals: presetFunctions.ts's
+        // runWavePointBatch{0..3} exports write these directly via
+        // WASM global.set instructions, eliminating the per-sample
+        // WebAssembly.Global#value setter dispatch that dominates
+        // customWaveform's cost on heavy waveform presets.
+        wavePerFrame0: wasmVarPools.wavePerFrame0,
+        wavePerFrame1: wasmVarPools.wavePerFrame1,
+        wavePerFrame2: wasmVarPools.wavePerFrame2,
+        wavePerFrame3: wasmVarPools.wavePerFrame3,
+        wavePointEqs: {
+          wave0: handleEmptyFunction(mod.exports.waves_0_point_eqs),
+          wave1: handleEmptyFunction(mod.exports.waves_1_point_eqs),
+          wave2: handleEmptyFunction(mod.exports.waves_2_point_eqs),
+          wave3: handleEmptyFunction(mod.exports.waves_3_point_eqs),
+        },
         console: {
           logi: (value) => {
             // eslint-disable-next-line no-console
@@ -661,6 +680,27 @@ export default class Visualizer {
       }
     }
 
+    const runWavePointBatchExports = [
+      presetFunctionsMod.exports.runWavePointBatch0,
+      presetFunctionsMod.exports.runWavePointBatch1,
+      presetFunctionsMod.exports.runWavePointBatch2,
+      presetFunctionsMod.exports.runWavePointBatch3,
+    ];
+    // Allocate all 4 waves' per-sample WASM buffers up front so any
+    // memory.grow triggered here happens before we cache views (a grown
+    // memory detaches previously-obtained views). See
+    // customWaveform.js for how these are consumed.
+    const maxWaveSamples = 512;
+    const waveBufferPointers = [];
+    for (let i = 0; i < 4; i++) {
+      waveBufferPointers.push({
+        positions: presetFunctionsMod.exports.createFloat32Array(maxWaveSamples * 3),
+        colors: presetFunctionsMod.exports.createFloat32Array(maxWaveSamples * 4),
+        pointsData0: presetFunctionsMod.exports.createFloat32Array(maxWaveSamples),
+        pointsData1: presetFunctionsMod.exports.createFloat32Array(maxWaveSamples),
+      });
+    }
+
     for (let i = 0; i < preset.waves.length; i++) {
       if (preset.waves[i].baseVals.enabled !== 0) {
         const wave = {
@@ -677,6 +717,23 @@ export default class Visualizer {
         } else {
           wave.point_eqs = "";
         }
+
+        // WASM per-sample loop runner + shared linear-memory buffers
+        // for its Float32Array inputs/outputs. customWaveform writes
+        // pointsData0/1 via the JS view, calls runWavePointBatch, then
+        // reads positions/colors via the same views for the GL upload.
+        const ptrs = waveBufferPointers[i];
+        wave.wasmBuffers = {
+          runWavePointBatch: runWavePointBatchExports[i],
+          positionsPtr: ptrs.positions,
+          colorsPtr: ptrs.colors,
+          pointsData0Ptr: ptrs.pointsData0,
+          pointsData1Ptr: ptrs.pointsData1,
+          positionsView: presetFunctionsMod.exports.__getFloat32ArrayView(ptrs.positions),
+          colorsView: presetFunctionsMod.exports.__getFloat32ArrayView(ptrs.colors),
+          pointsData0View: presetFunctionsMod.exports.__getFloat32ArrayView(ptrs.pointsData0),
+          pointsData1View: presetFunctionsMod.exports.__getFloat32ArrayView(ptrs.pointsData1),
+        };
 
         preset.waves[i] = Object.assign({}, preset.waves[i], wave);
       }

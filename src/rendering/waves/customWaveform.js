@@ -239,43 +239,91 @@ export default class CustomWaveform {
             this.colors[j * 4 + 3] = a * alphaMult;
           }
         } else {
-          const varPool =
-            presetEquationRunner.preset.globalPools[
-              `wavePerFrame${this.index}`
-            ];
-          for (let j = 0; j < this.samples; j++) {
-            const value1 = this.pointsData[0][j];
-            const value2 = this.pointsData[1][j];
-
-            varPool.sample.value = j / (this.samples - 1);
-            varPool.value1.value = value1;
-            varPool.value2.value = value2;
-            varPool.x.value = 0.5 + value1;
-            varPool.y.value = 0.5 + value2;
-            varPool.r.value = frameR;
-            varPool.g.value = frameG;
-            varPool.b.value = frameB;
-            varPool.a.value = frameA;
-
-            if (waveEqs.point_eqs) {
-              presetEquationRunner.preset.waves[this.index].point_eqs();
+          // WASM path: hand the per-sample loop to
+          // presetFunctions.ts:runWavePointBatch<idx>. That function
+          // runs 512 iterations of setup + point_eqs + result-read
+          // entirely in-Wasm via global.set/global.get, avoiding the
+          // ~15 JS↔WASM boundary crossings per sample the previous
+          // JS loop incurred. See PR #? for the measurement.
+          const wasmBuffers = presetEquationRunner.preset.waves[this.index]
+            .wasmBuffers;
+          if (wasmBuffers) {
+            // Marshal per-frame smoothed pointsData into the WASM-heap
+            // views the batch function reads from.
+            const inLeft = wasmBuffers.pointsData0View;
+            const inRight = wasmBuffers.pointsData1View;
+            const srcLeft = this.pointsData[0];
+            const srcRight = this.pointsData[1];
+            for (let j = 0; j < this.samples; j++) {
+              inLeft[j] = srcLeft[j];
+              inRight[j] = srcRight[j];
             }
+            const invSamplesMinus1 = 1.0 / (this.samples - 1);
+            wasmBuffers.runWavePointBatch(
+              wasmBuffers.positionsPtr,
+              wasmBuffers.colorsPtr,
+              wasmBuffers.pointsData0Ptr,
+              wasmBuffers.pointsData1Ptr,
+              this.samples,
+              invSamplesMinus1,
+              frameR,
+              frameG,
+              frameB,
+              frameA,
+              this.invAspectx,
+              this.invAspecty,
+              alphaMult,
+              waveEqs.point_eqs ? 1 : 0
+            );
+            // Downstream code (gl.bufferData, smoothWaveAndColor)
+            // reads from this.positions / this.colors — point them at
+            // the WASM-side views. Same buffer semantics as before.
+            this.positions = wasmBuffers.positionsView;
+            this.colors = wasmBuffers.colorsView;
+          } else {
+            // Fallback for a preset that somehow reached us without
+            // wasmBuffers wired up (e.g. loaded via a code path that
+            // doesn't allocate them). Should not happen for
+            // butterchurn-presets/base, but keep the old JS loop as
+            // a safety net rather than throwing.
+            const varPool =
+              presetEquationRunner.preset.globalPools[
+                `wavePerFrame${this.index}`
+              ];
+            for (let j = 0; j < this.samples; j++) {
+              const value1 = this.pointsData[0][j];
+              const value2 = this.pointsData[1][j];
 
-            const x = (varPool.x.value * 2 - 1) * this.invAspectx;
-            const y = (varPool.y.value * -2 + 1) * this.invAspecty;
-            const r = varPool.r.value;
-            const g = varPool.g.value;
-            const b = varPool.b.value;
-            const a = varPool.a.value;
+              varPool.sample.value = j / (this.samples - 1);
+              varPool.value1.value = value1;
+              varPool.value2.value = value2;
+              varPool.x.value = 0.5 + value1;
+              varPool.y.value = 0.5 + value2;
+              varPool.r.value = frameR;
+              varPool.g.value = frameG;
+              varPool.b.value = frameB;
+              varPool.a.value = frameA;
 
-            this.positions[j * 3 + 0] = x;
-            this.positions[j * 3 + 1] = y;
-            this.positions[j * 3 + 2] = 0;
+              if (waveEqs.point_eqs) {
+                presetEquationRunner.preset.waves[this.index].point_eqs();
+              }
 
-            this.colors[j * 4 + 0] = r;
-            this.colors[j * 4 + 1] = g;
-            this.colors[j * 4 + 2] = b;
-            this.colors[j * 4 + 3] = a * alphaMult;
+              const x = (varPool.x.value * 2 - 1) * this.invAspectx;
+              const y = (varPool.y.value * -2 + 1) * this.invAspecty;
+              const r = varPool.r.value;
+              const g = varPool.g.value;
+              const b = varPool.b.value;
+              const a = varPool.a.value;
+
+              this.positions[j * 3 + 0] = x;
+              this.positions[j * 3 + 1] = y;
+              this.positions[j * 3 + 2] = 0;
+
+              this.colors[j * 4 + 0] = r;
+              this.colors[j * 4 + 1] = g;
+              this.colors[j * 4 + 2] = b;
+              this.colors[j * 4 + 3] = a * alphaMult;
+            }
           }
         }
 
