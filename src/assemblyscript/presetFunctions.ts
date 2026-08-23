@@ -868,3 +868,257 @@ export function shape3_restore(): void {
   tex_ang_3 = tex_ang_3_save;
   additive_3 = additive_3_save;
 }
+
+// -----------------------------------------------------------------------------
+// Custom-waveform per-sample loop (moved from customWaveform.js).
+//
+// Previous JS loop wrote 9 fields via `WebAssembly.Global#value` per sample
+// and read 6 back, for ~15 JS↔WASM boundary crossings per sample. With up
+// to 4 enabled waves × 512 samples/frame that hit 15% of non-idle CPU on
+// a real preset (_Mig_085 profile 2026-08-23). Running the loop here
+// swaps those C++ property-accessor calls for in-Wasm `global.set` /
+// `global.get` instructions; the per-sample point_eqs call is imported
+// as a Wasm function reference, so its dispatch is Wasm→Wasm.
+//
+// Four export copies (one per wave slot) rather than a runtime dispatch
+// because Wasm globals must be referenced by name at compile time.
+
+@external("wavePerFrame0", "sample") declare let wave0_sample: f64;
+@external("wavePerFrame0", "value1") declare let wave0_value1: f64;
+@external("wavePerFrame0", "value2") declare let wave0_value2: f64;
+@external("wavePerFrame0", "x") declare let wave0_x: f64;
+@external("wavePerFrame0", "y") declare let wave0_y: f64;
+@external("wavePerFrame0", "r") declare let wave0_r: f64;
+@external("wavePerFrame0", "g") declare let wave0_g: f64;
+@external("wavePerFrame0", "b") declare let wave0_b: f64;
+@external("wavePerFrame0", "a") declare let wave0_a: f64;
+@external("wavePointEqs", "wave0") declare function wave0_pointEqs(): void;
+
+@external("wavePerFrame1", "sample") declare let wave1_sample: f64;
+@external("wavePerFrame1", "value1") declare let wave1_value1: f64;
+@external("wavePerFrame1", "value2") declare let wave1_value2: f64;
+@external("wavePerFrame1", "x") declare let wave1_x: f64;
+@external("wavePerFrame1", "y") declare let wave1_y: f64;
+@external("wavePerFrame1", "r") declare let wave1_r: f64;
+@external("wavePerFrame1", "g") declare let wave1_g: f64;
+@external("wavePerFrame1", "b") declare let wave1_b: f64;
+@external("wavePerFrame1", "a") declare let wave1_a: f64;
+@external("wavePointEqs", "wave1") declare function wave1_pointEqs(): void;
+
+@external("wavePerFrame2", "sample") declare let wave2_sample: f64;
+@external("wavePerFrame2", "value1") declare let wave2_value1: f64;
+@external("wavePerFrame2", "value2") declare let wave2_value2: f64;
+@external("wavePerFrame2", "x") declare let wave2_x: f64;
+@external("wavePerFrame2", "y") declare let wave2_y: f64;
+@external("wavePerFrame2", "r") declare let wave2_r: f64;
+@external("wavePerFrame2", "g") declare let wave2_g: f64;
+@external("wavePerFrame2", "b") declare let wave2_b: f64;
+@external("wavePerFrame2", "a") declare let wave2_a: f64;
+@external("wavePointEqs", "wave2") declare function wave2_pointEqs(): void;
+
+@external("wavePerFrame3", "sample") declare let wave3_sample: f64;
+@external("wavePerFrame3", "value1") declare let wave3_value1: f64;
+@external("wavePerFrame3", "value2") declare let wave3_value2: f64;
+@external("wavePerFrame3", "x") declare let wave3_x: f64;
+@external("wavePerFrame3", "y") declare let wave3_y: f64;
+@external("wavePerFrame3", "r") declare let wave3_r: f64;
+@external("wavePerFrame3", "g") declare let wave3_g: f64;
+@external("wavePerFrame3", "b") declare let wave3_b: f64;
+@external("wavePerFrame3", "a") declare let wave3_a: f64;
+@external("wavePointEqs", "wave3") declare function wave3_pointEqs(): void;
+
+export function runWavePointBatch0(
+  positions: Float32Array,
+  colors: Float32Array,
+  pointsData0: Float32Array,
+  pointsData1: Float32Array,
+  samples: i32,
+  invSamplesMinus1: f64,
+  frameR: f64,
+  frameG: f64,
+  frameB: f64,
+  frameA: f64,
+  invAspectx: f64,
+  invAspecty: f64,
+  alphaMult: f64,
+  runEqs: bool
+): void {
+  for (let j: i32 = 0; j < samples; j++) {
+    const value1: f64 = f64(unchecked(pointsData0[j]));
+    const value2: f64 = f64(unchecked(pointsData1[j]));
+    wave0_sample = f64(j) * invSamplesMinus1;
+    wave0_value1 = value1;
+    wave0_value2 = value2;
+    wave0_x = 0.5 + value1;
+    wave0_y = 0.5 + value2;
+    wave0_r = frameR;
+    wave0_g = frameG;
+    wave0_b = frameB;
+    wave0_a = frameA;
+
+    if (runEqs) {
+      wave0_pointEqs();
+    }
+
+    const x: f64 = (wave0_x * 2.0 - 1.0) * invAspectx;
+    const y: f64 = (wave0_y * -2.0 + 1.0) * invAspecty;
+
+    const posOffset: i32 = j * 3;
+    unchecked((positions[posOffset + 0] = f32(x)));
+    unchecked((positions[posOffset + 1] = f32(y)));
+    unchecked((positions[posOffset + 2] = 0.0));
+
+    const colorOffset: i32 = j * 4;
+    unchecked((colors[colorOffset + 0] = f32(wave0_r)));
+    unchecked((colors[colorOffset + 1] = f32(wave0_g)));
+    unchecked((colors[colorOffset + 2] = f32(wave0_b)));
+    unchecked((colors[colorOffset + 3] = f32(wave0_a * alphaMult)));
+  }
+}
+
+export function runWavePointBatch1(
+  positions: Float32Array,
+  colors: Float32Array,
+  pointsData0: Float32Array,
+  pointsData1: Float32Array,
+  samples: i32,
+  invSamplesMinus1: f64,
+  frameR: f64,
+  frameG: f64,
+  frameB: f64,
+  frameA: f64,
+  invAspectx: f64,
+  invAspecty: f64,
+  alphaMult: f64,
+  runEqs: bool
+): void {
+  for (let j: i32 = 0; j < samples; j++) {
+    const value1: f64 = f64(unchecked(pointsData0[j]));
+    const value2: f64 = f64(unchecked(pointsData1[j]));
+    wave1_sample = f64(j) * invSamplesMinus1;
+    wave1_value1 = value1;
+    wave1_value2 = value2;
+    wave1_x = 0.5 + value1;
+    wave1_y = 0.5 + value2;
+    wave1_r = frameR;
+    wave1_g = frameG;
+    wave1_b = frameB;
+    wave1_a = frameA;
+
+    if (runEqs) {
+      wave1_pointEqs();
+    }
+
+    const x: f64 = (wave1_x * 2.0 - 1.0) * invAspectx;
+    const y: f64 = (wave1_y * -2.0 + 1.0) * invAspecty;
+
+    const posOffset: i32 = j * 3;
+    unchecked((positions[posOffset + 0] = f32(x)));
+    unchecked((positions[posOffset + 1] = f32(y)));
+    unchecked((positions[posOffset + 2] = 0.0));
+
+    const colorOffset: i32 = j * 4;
+    unchecked((colors[colorOffset + 0] = f32(wave1_r)));
+    unchecked((colors[colorOffset + 1] = f32(wave1_g)));
+    unchecked((colors[colorOffset + 2] = f32(wave1_b)));
+    unchecked((colors[colorOffset + 3] = f32(wave1_a * alphaMult)));
+  }
+}
+
+export function runWavePointBatch2(
+  positions: Float32Array,
+  colors: Float32Array,
+  pointsData0: Float32Array,
+  pointsData1: Float32Array,
+  samples: i32,
+  invSamplesMinus1: f64,
+  frameR: f64,
+  frameG: f64,
+  frameB: f64,
+  frameA: f64,
+  invAspectx: f64,
+  invAspecty: f64,
+  alphaMult: f64,
+  runEqs: bool
+): void {
+  for (let j: i32 = 0; j < samples; j++) {
+    const value1: f64 = f64(unchecked(pointsData0[j]));
+    const value2: f64 = f64(unchecked(pointsData1[j]));
+    wave2_sample = f64(j) * invSamplesMinus1;
+    wave2_value1 = value1;
+    wave2_value2 = value2;
+    wave2_x = 0.5 + value1;
+    wave2_y = 0.5 + value2;
+    wave2_r = frameR;
+    wave2_g = frameG;
+    wave2_b = frameB;
+    wave2_a = frameA;
+
+    if (runEqs) {
+      wave2_pointEqs();
+    }
+
+    const x: f64 = (wave2_x * 2.0 - 1.0) * invAspectx;
+    const y: f64 = (wave2_y * -2.0 + 1.0) * invAspecty;
+
+    const posOffset: i32 = j * 3;
+    unchecked((positions[posOffset + 0] = f32(x)));
+    unchecked((positions[posOffset + 1] = f32(y)));
+    unchecked((positions[posOffset + 2] = 0.0));
+
+    const colorOffset: i32 = j * 4;
+    unchecked((colors[colorOffset + 0] = f32(wave2_r)));
+    unchecked((colors[colorOffset + 1] = f32(wave2_g)));
+    unchecked((colors[colorOffset + 2] = f32(wave2_b)));
+    unchecked((colors[colorOffset + 3] = f32(wave2_a * alphaMult)));
+  }
+}
+
+export function runWavePointBatch3(
+  positions: Float32Array,
+  colors: Float32Array,
+  pointsData0: Float32Array,
+  pointsData1: Float32Array,
+  samples: i32,
+  invSamplesMinus1: f64,
+  frameR: f64,
+  frameG: f64,
+  frameB: f64,
+  frameA: f64,
+  invAspectx: f64,
+  invAspecty: f64,
+  alphaMult: f64,
+  runEqs: bool
+): void {
+  for (let j: i32 = 0; j < samples; j++) {
+    const value1: f64 = f64(unchecked(pointsData0[j]));
+    const value2: f64 = f64(unchecked(pointsData1[j]));
+    wave3_sample = f64(j) * invSamplesMinus1;
+    wave3_value1 = value1;
+    wave3_value2 = value2;
+    wave3_x = 0.5 + value1;
+    wave3_y = 0.5 + value2;
+    wave3_r = frameR;
+    wave3_g = frameG;
+    wave3_b = frameB;
+    wave3_a = frameA;
+
+    if (runEqs) {
+      wave3_pointEqs();
+    }
+
+    const x: f64 = (wave3_x * 2.0 - 1.0) * invAspectx;
+    const y: f64 = (wave3_y * -2.0 + 1.0) * invAspecty;
+
+    const posOffset: i32 = j * 3;
+    unchecked((positions[posOffset + 0] = f32(x)));
+    unchecked((positions[posOffset + 1] = f32(y)));
+    unchecked((positions[posOffset + 2] = 0.0));
+
+    const colorOffset: i32 = j * 4;
+    unchecked((colors[colorOffset + 0] = f32(wave3_r)));
+    unchecked((colors[colorOffset + 1] = f32(wave3_g)));
+    unchecked((colors[colorOffset + 2] = f32(wave3_b)));
+    unchecked((colors[colorOffset + 3] = f32(wave3_a * alphaMult)));
+  }
+}
