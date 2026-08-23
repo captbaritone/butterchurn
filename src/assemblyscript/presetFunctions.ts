@@ -196,6 +196,104 @@ export function runPixelEquations(
   }
 }
 
+// Fast-path for presets with empty pixel_eqs_eel (43% of the base pack).
+// Without per-pixel equations, warp/zoom/rot/etc are constant across the
+// mesh; hoist trig + reciprocals out, drop the save/restore machinery,
+// and guard the rot=0 branch. Called from renderer.js when
+// runVertEQs === false. Must produce the same output as
+// runPixelEquations(runVertEQs=false, ...) so visual regression passes.
+export function runPixelEquationsEmpty(
+  arr: Float32Array,
+  meshWidth: i32,
+  meshHeight: i32,
+  time: f64,
+  warpanimspeed: f64,
+  warpscale: f64,
+  aspectx: f64,
+  aspecty: f64
+): void {
+  const gridX: i32 = meshWidth;
+  const gridZ: i32 = meshHeight;
+  const gridX1: i32 = meshWidth + 1;
+  const gridZ1: i32 = meshHeight + 1;
+
+  const warpTimeV: f64 = time * warpanimspeed;
+  const warpScaleInv: f64 = 1.0 / warpscale;
+  const warpf0: f64 = 11.68 + 4.0 * Math.cos(warpTimeV * 1.413 + 10.0);
+  const warpf1: f64 = 8.77 + 3.0 * Math.cos(warpTimeV * 1.113 + 7.0);
+  const warpf2: f64 = 10.54 + 3.0 * Math.cos(warpTimeV * 1.233 + 3.0);
+  const warpf3: f64 = 11.49 + 4.0 * Math.cos(warpTimeV * 0.933 + 5.0);
+
+  // Values are constants across all vertices in the empty-pixel-eqs case.
+  const warpScaled: f64 = warp * 0.0035;
+  const hasWarp: bool = warp !== 0;
+  const hasRot: bool = rot !== 0;
+  const cosRotConst: f64 = hasRot ? Math.cos(rot) : 1.0;
+  const sinRotConst: f64 = hasRot ? Math.sin(rot) : 0.0;
+
+  let offset: i32 = 0;
+
+  for (let iz: i32 = 0; iz < gridZ1; iz++) {
+    for (let ix: i32 = 0; ix < gridX1; ix++) {
+      const x2: f64 = (f64(ix) / f64(gridX)) * 2.0 - 1.0;
+      const y2: f64 = (f64(iz) / f64(gridZ)) * 2.0 - 1.0;
+      const rad2: f64 = Math.sqrt(
+        x2 * x2 * aspectx * aspectx + y2 * y2 * aspecty * aspecty
+      );
+
+      const zoom2V: f64 = zoom ** (zoomexp ** (rad2 * 2.0 - 1.0));
+      const zoom2Inv: f64 = 1.0 / zoom2V;
+
+      let u: f64 = x2 * 0.5 * aspectx * zoom2Inv + 0.5;
+      let v: f64 = -y2 * 0.5 * aspecty * zoom2Inv + 0.5;
+
+      u = (u - cx) / sx + cx;
+      v = (v - cy) / sy + cy;
+
+      if (hasWarp) {
+        u +=
+          warpScaled *
+          Math.sin(
+            warpTimeV * 0.333 + warpScaleInv * (x2 * warpf0 - y2 * warpf3)
+          );
+        v +=
+          warpScaled *
+          Math.cos(
+            warpTimeV * 0.375 - warpScaleInv * (x2 * warpf2 + y2 * warpf1)
+          );
+        u +=
+          warpScaled *
+          Math.cos(
+            warpTimeV * 0.753 - warpScaleInv * (x2 * warpf1 - y2 * warpf2)
+          );
+        v +=
+          warpScaled *
+          Math.sin(
+            warpTimeV * 0.825 + warpScaleInv * (x2 * warpf0 + y2 * warpf3)
+          );
+      }
+
+      if (hasRot) {
+        const u2: f64 = u - cx;
+        const v2: f64 = v - cy;
+        u = u2 * cosRotConst - v2 * sinRotConst + cx;
+        v = u2 * sinRotConst + v2 * cosRotConst + cy;
+      }
+
+      u -= dx;
+      v -= dy;
+
+      u = (u - 0.5) / aspectx + 0.5;
+      v = (v - 0.5) / aspecty + 0.5;
+
+      unchecked((arr[offset] = f32(u)));
+      unchecked((arr[offset + 1] = f32(v)));
+
+      offset += 2;
+    }
+  }
+}
+
 // Copy qs to after frame values
 
 @external("qVarPool", "q1")

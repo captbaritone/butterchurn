@@ -604,16 +604,31 @@ export default class Renderer {
       varPool.sx.value = mdVSFrame.sx;
       varPool.sy.value = mdVSFrame.sy;
 
-      presetEquationRunner.preset.pixel_eqs_wasm(
-        presetEquationRunner.runVertEQs,
-        this.mesh_width,
-        this.mesh_height,
-        this.time,
-        mdVSFrame.warpanimspeed,
-        mdVSFrame.warpscale,
-        this.aspectx,
-        this.aspecty
-      );
+      if (presetEquationRunner.runVertEQs) {
+        presetEquationRunner.preset.pixel_eqs_wasm(
+          presetEquationRunner.runVertEQs,
+          this.mesh_width,
+          this.mesh_height,
+          this.time,
+          mdVSFrame.warpanimspeed,
+          mdVSFrame.warpscale,
+          this.aspectx,
+          this.aspecty
+        );
+      } else {
+        // Empty-pixel-eqs fast path: dedicated WASM export with hoisted
+        // invariants + rot=0 guard baked in at compile time. Same output
+        // as pixel_eqs_wasm(false, ...) but with less per-vertex work.
+        presetEquationRunner.preset.pixel_eqs_wasm_empty(
+          this.mesh_width,
+          this.mesh_height,
+          this.time,
+          mdVSFrame.warpanimspeed,
+          mdVSFrame.warpscale,
+          this.aspectx,
+          this.aspecty
+        );
+      }
 
       if (!blending) {
         this.warpUVs = presetEquationRunner.preset.pixel_eqs_get_array();
