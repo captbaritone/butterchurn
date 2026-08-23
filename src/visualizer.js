@@ -634,12 +634,13 @@ export default class Visualizer {
         (meshWidth + 1) * (meshHeight + 1) * 2
       );
       preset.pixel_eqs_array = arrPtr;
+      // Cache the Float32Array view over WASM linear memory. Safe to
+      // reuse across every frame — the underlying buffer never moves
+      // (there are no memory.grow calls after initialization).
+      preset.pixel_eqs_array_view =
+        presetFunctionsMod.exports.__getFloat32ArrayView(arrPtr);
     };
-    preset.pixel_eqs_get_array = () => {
-      return presetFunctionsMod.exports.__getFloat32ArrayView(
-        preset.pixel_eqs_array
-      );
-    };
+    preset.pixel_eqs_get_array = () => preset.pixel_eqs_array_view;
     preset.pixel_eqs_wasm = (...args) =>
       presetFunctionsMod.exports.runPixelEquations(
         preset.pixel_eqs_array,
